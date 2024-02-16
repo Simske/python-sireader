@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "sireader"
+version = "2.0.0-alpha.0"
+description = "Communicating with SportIdent devices"
+authors = [
+    "Gaudenz Steinlin <gaudenz@durcheinandertal.ch>",
+    "Simon Harston <simon@harston.de>",
+    "Jan Vorwerk <jan.vorwerk@angexis.com>",
+    "Per Magnusson <per.magnusson@gmail.com>",
+    "Simeon Doetsch <mail@simske.com>"
+]
+maintainers = ["Simeon Doetsch <mail@simske.com>"]
+license = "GPL-3.0-or-later"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.8,<3.13"
+six = "^1.16.0"
+pyserial = "^3.5"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
