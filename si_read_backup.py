@@ -23,89 +23,99 @@ parameter to the program:
 si_read_backup.py COM4
 """
 
-from sireader2 import SIReader, SIReaderException
 import sys
 
+from sireader2 import SIReader, SIReaderException
 
 try:
     if len(sys.argv) > 1:
         # Use command line argument as serial port name
-        si = SIReader(port = sys.argv[1])
+        si = SIReader(port=sys.argv[1])
     else:
         # Find serial port automatically
         si = SIReader()
-    print('Connected to station on port ' + si.port)
+    print("Connected to station on port " + si.port)
 except:
-    print('Failed to connect to an SI station on any of the available serial ports.')
+    print("Failed to connect to an SI station on any of the available serial ports.")
     exit()
-    
+
 
 # Set station in remote mode
 ok = False
-errmsg = ''
-for ii in range(0,3):
+errmsg = ""
+for ii in range(0, 3):
     try:
         si.set_remote()
         ok = True
-        break;
+        break
     except SIReaderException as msg:
         errmsg = msg
 if not ok:
-    print('ERROR: Failed to set station in remote mode: %s' % errmsg)
+    print("ERROR: Failed to set station in remote mode: %s" % errmsg)
     exit()
 
 
-print('Ready to read backup memory of SI station.')
+print("Ready to read backup memory of SI station.")
 maxretries = 5
 while True:
-    inp = input('    Press <Enter> to read remote station, d to read direct station or q to quit: ')
-    if inp == 'q':
+    inp = input(
+        "    Press <Enter> to read remote station, d to read direct station or q to quit: "
+    )
+    if inp == "q":
         break
-    elif inp == 'd':
+    elif inp == "d":
         if not si.direct:
             si.set_direct()
-    elif inp == '':
+    elif inp == "":
         if si.direct:
             si.set_remote()
     else:
-        print('    Unrecognized input')
+        print("    Unrecognized input")
         continue
-        
+
     ok = False
-    errmsg = ''
+    errmsg = ""
     for ii in range(0, maxretries):
         try:
             si._update_proto_config()
             ok = True
-            break;
+            break
         except SIReaderException as msg:
             errmsg = msg
     if not ok:
-        print('ERROR: Failed to talk to the station: %s' % errmsg)
-        print('Maybe the station is not connected or not awake?')
+        print("ERROR: Failed to talk to the station: %s" % errmsg)
+        print("Maybe the station is not connected or not awake?")
         continue
-        
-    if not si.proto_config['mode'] in si.SUPPORTED_READ_BACKUP_MODES:
-        print("ERROR: Station is in mode %s, which is not supported for backup readout" % 
-              si.MODE2NAME[si.proto_config['mode']])
+
+    if not si.proto_config["mode"] in si.SUPPORTED_READ_BACKUP_MODES:
+        print(
+            "ERROR: Station is in mode %s, which is not supported for backup readout"
+            % si.MODE2NAME[si.proto_config["mode"]]
+        )
         continue
 
     ok = False
     for ii in range(0, maxretries):
         try:
-            print('    Trying to read backup memory of station: ' + str(si._station_code) + ' ', end='')
+            print(
+                "    Trying to read backup memory of station: "
+                + str(si._station_code)
+                + " ",
+                end="",
+            )
             sys.stdout.flush()
             backup = si.read_backup(progress=1)
             csvfilename = si.write_backup_csv(backup)
-            print(csvfilename + ' was created')
+            print(csvfilename + " was created")
             ok = True
             si.beep()
             break
         except SIReaderException as msg:
-            print('')
+            print("")
             errmsg = msg
     if not ok:
-        print('ERROR: Failed to talk to the station: %s' % errmsg)
-        print('Maybe the station is not connected, not awake or not in a supported mode?')
+        print("ERROR: Failed to talk to the station: %s" % errmsg)
+        print(
+            "Maybe the station is not connected, not awake or not in a supported mode?"
+        )
         continue
-

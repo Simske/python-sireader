@@ -21,27 +21,26 @@ To select a specific serial port, provide it's name as the first command line
 parameter to the program.
 """
 
-from sireader2 import SIReader, SIReaderException, SIReaderControl, SIReaderReadout
-from time import sleep
-from datetime import datetime
 import sys
+from datetime import datetime
+from time import sleep
 
+from sireader2 import SIReader, SIReaderControl, SIReaderException, SIReaderReadout
 
 try:
     if len(sys.argv) > 1:
         # Use command line argument as serial port name
-        si = SIReaderReadout(port = sys.argv[1])
+        si = SIReaderReadout(port=sys.argv[1])
     else:
         # Find serial port automatically
         si = SIReaderReadout()
-    print('Connected to station on port ' + si.port)
+    print("Connected to station on port " + si.port)
 except:
-    print('Failed to connect to an SI station on any of the available serial ports.')
+    print("Failed to connect to an SI station on any of the available serial ports.")
     exit()
-    
 
 
-print('Insert SI-card to be read')
+print("Insert SI-card to be read")
 # wait for a card to be inserted into the reader
 while not si.poll_sicard():
     sleep(1)
@@ -56,17 +55,15 @@ card_data = si.read_sicard()
 # beep
 si.ack_sicard()
 
-print('Number: ' + str(card_number))
-print('Type:   ' + card_type)
-print('Data:')
+print("Number: " + str(card_number))
+print("Type:   " + card_type)
+print("Data:")
 for key, val in card_data.items():
-    if key == 'punches':
+    if key == "punches":
         for p in val:
             code = p[0]
             tim = p[1]
-            print(str(code) + ' ' + tim.isoformat(sep = ' '))
+            print(str(code) + " " + tim.isoformat(sep=" "))
     else:
-        print(key + ' : ', end='')
+        print(key + " : ", end="")
         print(val)
-
-

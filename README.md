@@ -30,7 +30,7 @@ Additions and modifications in sireader2.py compared to sireader.py:
 - Added sysval_ functions to access configuration data in SYS_VAL.
 
 ## Install
-For Windows, you will need a driver to talk to older generations of USB stations. 
+For Windows, you will need a driver to talk to older generations of USB stations.
 From https://www.sportident.com/products/96-software/161-usb-driver.html:
 "New generation of BS11-BS/-BL with HID interface do not require this driver."
 

@@ -36,22 +36,22 @@ The following settings are made:
 - Set the baud rate to 4800.
 - Turn the station off.
 
-The progress is saved to a CSV file. Each station that is processed 
+The progress is saved to a CSV file. Each station that is processed
 gets two lines in the file; one line with information about the state
 before the changes and a second line with information about the state
-after the changes. 
+after the changes.
 """
 
-from sireader2 import SIReader, SIReaderException, SIReaderControl, SIReaderReadout
-from time import sleep
-from datetime import datetime, timedelta
-import sys
 import csv
+import sys
+from datetime import datetime, timedelta
+from time import sleep
 
+from sireader2 import SIReader, SIReaderControl, SIReaderException, SIReaderReadout
 
 #####################################################
 # Edit this if another active time is desired.
-active_minutes = 4*60
+active_minutes = 4 * 60
 #####################################################
 
 
@@ -62,13 +62,13 @@ def get_station_status(si):
     """
     now_time = datetime.now()
     si_time = si.get_time()
-    time_delta = si_time-now_time
+    time_delta = si_time - now_time
     ms = timedelta(microseconds=1000)
     if time_delta >= timedelta(0):
         time_delta_str = str(time_delta)
     else:
         time_delta = -time_delta
-        time_delta_str = '-' + str(time_delta)
+        time_delta_str = "-" + str(time_delta)
     time_delta_str = time_delta_str[0:-3]  # Truncate to ms
     si.refresh_sysval()
 
@@ -88,42 +88,60 @@ def get_station_status(si):
     code = si.sysval_code()
     mode = si.sysval_mode_str()
     active_time = si.sysval_active_time()
-    active_hours = active_time//60
-    active_minutes = active_time%60
+    active_hours = active_time // 60
+    active_minutes = active_time % 60
     active_str = "%02d:%02d:00" % (active_hours, active_minutes)
     protocol = si.sysval_protocol()
     si6_192 = si.sysval_192_punches()
     feedback = si.sysval_feedback()
 
-    autosend_str = '-'
+    autosend_str = "-"
     if protocol & 0b10:
-        autosend_str = 'Autosend'
+        autosend_str = "Autosend"
 
-    legacy_str = 'LegacyProtocol!'
+    legacy_str = "LegacyProtocol!"
     if protocol & 0b1:
-        legacy_str = '-'
+        legacy_str = "-"
 
     if si6_192 is True:
-        si6_192_str = 'Card6With192Records!'
+        si6_192_str = "Card6With192Records!"
     elif si6_192 is False:
-        si6_192_str = '-'
+        si6_192_str = "-"
     else:
-        si6_192_str = '0x%02x' % si6_192
-        
-    optical_str = ''
+        si6_192_str = "0x%02x" % si6_192
+
+    optical_str = ""
     if feedback & 0b1:
-        optical_str = 'OpticalSignal1'
-    audible_str = ''
+        optical_str = "OpticalSignal1"
+    audible_str = ""
     if feedback & 0b100:
-        audible_str = 'AcousticSignal'
+        audible_str = "AcousticSignal"
 
     date = now_time.strftime("%Y-%m-%d")
     time = now_time.strftime("%H:%M:%S")
-    
-    row = [date, time, serno, model, fwver, bat_date, bat_use_str, volt_str,
-           code, mode, time_delta_str, active_str, autosend_str, legacy_str,
-           si6_192_str, audible_str, optical_str, build_date, mem_size_str,
-           bat_cap_str ]
+
+    row = [
+        date,
+        time,
+        serno,
+        model,
+        fwver,
+        bat_date,
+        bat_use_str,
+        volt_str,
+        code,
+        mode,
+        time_delta_str,
+        active_str,
+        autosend_str,
+        legacy_str,
+        si6_192_str,
+        audible_str,
+        optical_str,
+        build_date,
+        mem_size_str,
+        bat_cap_str,
+    ]
 
     return row
 
@@ -131,76 +149,95 @@ def get_station_status(si):
 try:
     if len(sys.argv) > 1:
         # Use command line argument as serial port name
-        si = SIReader(port = sys.argv[1])
+        si = SIReader(port=sys.argv[1])
     else:
         # Find serial port automatically
         si = SIReader()
-    print('Connected to station on port ' + si.port)
+    print("Connected to station on port " + si.port)
 except SIReaderException as e:
-    print('ERROR: ' + str(e))
-    print('Failed to connect to an SI station on any of the available serial ports.')
+    print("ERROR: " + str(e))
+    print("Failed to connect to an SI station on any of the available serial ports.")
     exit()
 except Exception as e:
-    print('Error: ' + str(e))
+    print("Error: " + str(e))
     exit()
-    
+
 
 # Set station in remote mode
 ok = False
-errmsg = ''
-for ii in range(0,3):
+errmsg = ""
+for ii in range(0, 3):
     try:
         si.set_direct()
-        sleep(.1)
+        sleep(0.1)
         si.set_baud_rate_38400()
-        sleep(.1)
+        sleep(0.1)
         si.set_remote()
         ok = True
-        break;
+        break
     except SIReaderException as msg:
         print(str(msg))
         errmsg = msg
 if not ok:
-    print('ERROR: Failed to set station in remote mode: %s' % errmsg)
+    print("ERROR: Failed to set station in remote mode: %s" % errmsg)
     exit()
 
 
-# Create a csv log file 
+# Create a csv log file
 datestr = datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
-csv_filename = 'Log_legacy_4800_' + datestr + '.csv'
-with open(csv_filename, 'w', newline='') as csvfile:
-    csvwriter = csv.writer(csvfile, delimiter=';',
-                           quotechar='"', quoting=csv.QUOTE_MINIMAL)
+csv_filename = "Log_legacy_4800_" + datestr + ".csv"
+with open(csv_filename, "w", newline="") as csvfile:
+    csvwriter = csv.writer(
+        csvfile, delimiter=";", quotechar='"', quoting=csv.QUOTE_MINIMAL
+    )
     # This structure is similar to the log from SI Config+, but lacks some fields,
-    # has some fields in a different order (to put more interesting information 
+    # has some fields in a different order (to put more interesting information
     # more to the left on the long rows) and has an extra TimeDiff field.
-    header = ['Date', 'Time', 'SerialNo', 'Hardware', 'Software', 'BatteryDate',
-              'BattUsage', 'Voltage', 'CodeNo', 'Mode', 'TimeDiff', 'OpTime', 'Autosend',
-              'LegacyProtocol', 'Card6with192punches', 'AcousticSignal', 
-              'OpticalSignal1', 'ProductionDate', 'MemorySize', 'BatteryCapacity']
+    header = [
+        "Date",
+        "Time",
+        "SerialNo",
+        "Hardware",
+        "Software",
+        "BatteryDate",
+        "BattUsage",
+        "Voltage",
+        "CodeNo",
+        "Mode",
+        "TimeDiff",
+        "OpTime",
+        "Autosend",
+        "LegacyProtocol",
+        "Card6with192punches",
+        "AcousticSignal",
+        "OpticalSignal1",
+        "ProductionDate",
+        "MemorySize",
+        "BatteryCapacity",
+    ]
     csvwriter.writerow(header)
 
     # Loop over stations
-    print('Ready to configure remote station.')
+    print("Ready to configure remote station.")
     maxretries = 5
     while True:
-        inp = input('Press <Enter> to process remote station. Press q to quit: ')
-        if inp == 'q':
+        inp = input("Press <Enter> to process remote station. Press q to quit: ")
+        if inp == "q":
             break
-        elif inp == '':
+        elif inp == "":
             pass
         else:
-            print('    Unrecognized input')
+            print("    Unrecognized input")
             continue
 
         # Try a few times if it does not work the first time
         ok = False
-        errmsg = ''
+        errmsg = ""
         for ii in range(0, maxretries):
             try:
                 # Read status information from the station
                 row = get_station_status(si)
-                #row = [date, time, serno, model, fwver, bat_date, bat_use_str, volt_str,
+                # row = [date, time, serno, model, fwver, bat_date, bat_use_str, volt_str,
                 #       code, mode, time_delta_str, active_str, autosend_str, legacy_str,
                 #       si6_192_str, audible_str, optical_str, build_date, mem_size_str,
                 #       bat_cap_str ]
@@ -208,29 +245,30 @@ with open(csv_filename, 'w', newline='') as csvfile:
                 volt = float(row[7])
                 code = row[8]
                 mode = row[9]
-                
+
                 # Write old status to CSV file
 
                 csvwriter.writerow(row)
 
-                print('code: %3d, volt: %4.2f V, mode: %s' % (code, volt, mode))
+                print("code: %3d, volt: %4.2f V, mode: %s" % (code, volt, mode))
                 if mode != "Control":
-                    print('WARNING: Not in Control mode!')
+                    print("WARNING: Not in Control mode!")
                     si.beep
                 elif code < 31:
-                    print('WARNING: Code is less than 31 despite being in Control mode!')
+                    print(
+                        "WARNING: Code is less than 31 despite being in Control mode!"
+                    )
                     si.beep
                 if volt < 3.1:
-                    print('WARNING: VERY low battery: %4.2f V' % volt)
+                    print("WARNING: VERY low battery: %4.2f V" % volt)
                     si.beep(2)
                 elif volt < 3.2:
-                    print('Warning: low battery: %4.2f V' % volt)
+                    print("Warning: low battery: %4.2f V" % volt)
                     si.beep
                 if fwver < "656":
-                    print('WARNING: Old firmware: %s' % fwver)
+                    print("WARNING: Old firmware: %s" % fwver)
                     si.beep
 
-    
                 # Configure the station's settings
                 si.set_time(datetime.now())
                 si.erase_backup()
@@ -240,34 +278,33 @@ with open(csv_filename, 'w', newline='') as csvfile:
                     si.set_si6_192(True)
                 else:
                     si.set_si6_192(False)
-                print('Set autosend')
-                si.set_autosend(True) # Set autosend mode
-                print('Set 4800')
-                si.set_baud_rate_4800() # 4800 baud on the remote station
-                print('Set legacy')
-                si.set_extended_protocol(False) # Set legacy mode
-                print('Done')
-
+                print("Set autosend")
+                si.set_autosend(True)  # Set autosend mode
+                print("Set 4800")
+                si.set_baud_rate_4800()  # 4800 baud on the remote station
+                print("Set legacy")
+                si.set_extended_protocol(False)  # Set legacy mode
+                print("Done")
 
                 # Read the station's updated settings and write it to the CSV file
                 si.set_direct()
-                sleep(.1)
+                sleep(0.1)
                 si.set_baud_rate_38400()
-                sleep(.1)
+                sleep(0.1)
                 si.set_remote()
                 row = get_station_status(si)
                 csvwriter.writerow(row)
 
                 # Turn the remote station off
                 si.poweroff()
-                
+
                 ok = True
-                break;
+                break
             except SIReaderException as msg:
                 print(str(msg))
         if not ok:
-            print('ERROR: Failed to talk to the station: %s' % errmsg)
-            print('Maybe the station is not connected or not awake?')
+            print("ERROR: Failed to talk to the station: %s" % errmsg)
+            print("Maybe the station is not connected or not awake?")
             continue
 
-print('Log file is: %s' % csv_filename)
+print("Log file is: %s" % csv_filename)
