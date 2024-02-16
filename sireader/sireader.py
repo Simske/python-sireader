@@ -50,8 +50,10 @@ import csv
 import os
 import re
 import sys
+import threading
 from binascii import hexlify
 from datetime import datetime, timedelta
+from typing import List, Literal, Optional, Tuple
 
 import serial.tools.list_ports
 from serial import Serial
@@ -67,33 +69,54 @@ class SIReader(SIConstants):
     Protocol Constants are defined in SIConstants.
     """
 
-    def __init__(self, *args, **kwargs):
-        """Initializes communication with si station at port.
-        @param port: Serial device for the connection if port is None it
-                     scans all available ports and connects to the first
-                     reader found
-            port = None, debug = False, logfile = None
+    def __init__(
+        self,
+        *,
+        port: Optional[str] = None,
+        debug: bool = False,
+        noconnect: bool = False,
+        lowspeed: bool = False,
+        logfile: Optional[str] = None,
+    ):
+        """Initializes communication with SI station.
+
+        Args:
+            port (Optional[str]): The port to connect to. If not provided, the code will
+                attempt to connect to all available serial ports.
+            debug (bool): Enable debug mode. Defaults to False.
+            noconnect (bool): Do not establish a connection to the SI station. Defaults
+                to False.
+            lowspeed (bool): Use low-speed mode. Defaults to False.
+            logfile (Optional[str]): The path to the log file. If provided, the log will
+                be written to this file. Defaults to None.
+
+        Raises:
+            SIReaderException: If no SI Reader is found.
         """
-        self._serial = None  # Serial port object
-        self._debug = kwargs["debug"] if "debug" in kwargs else False
-        self.proto_config = None
-        self._station_code = None
-        self._serno = 0  # Serial number of station
-        self.direct = True  # Direct or remote mode
-        self._noconnect = kwargs["noconnect"] if "noconnect" in kwargs else False
-        self._lowspeed = kwargs["lowspeed"] if "lowspeed" in kwargs else False
-        if "logfile" in kwargs:
-            self._logfile = open(kwargs["logfile"], "ab")
+        self._serial: Optional[Serial] = None  # Serial port object
+        self._debug: bool = debug
+        self.proto_config: Optional[dict] = None
+        self._station_code: Optional[int] = None
+        self._serno: int = 0  # Serial number of station
+        self.direct: bool = True  # Direct or remote mode
+        self._noconnect: bool = noconnect
+        self._lowspeed: bool = lowspeed
+
+        # TODO: refactor logging to file
+        if logfile is not None:
+            self._logfile = open(logfile, "ab")
         else:
             self._logfile = None
-        self.sysval = ""  # The most recently read station configuration information
+        self.sysval: str = (
+            ""  # The most recently read station configuration information
+        )
 
         errors = ""
-        if "port" in kwargs:
-            self._connect_reader(kwargs["port"])
+        if port is not None:
+            self._connect_reader(port)
             return
         else:
-            scan_ports = self.guessSerialPorts()
+            scan_ports = self.guess_serial_ports()
 
             if len(scan_ports) == 0:
                 errors = "no serial ports found"
@@ -109,19 +132,18 @@ class SIReader(SIConstants):
 
         raise SIReaderException("No SI Reader found. Possible reasons: %s" % errors)
 
-    def __del__(self):
-        if self._logfile != None:
-            self._logfile.close()
+    @staticmethod
+    def guess_serial_ports(ttyS: bool = False) -> List[str]:
+        """
+        Look for a COM port that might be connected to a Sportident station.
 
-    @classmethod
-    def guessSerialPorts(self, ttyS=False):
-        """Look for a COM port that might be connected to a Sportident station."""
+        Args:
+            ttyS (bool): Flag indicating whether to include ttyS ports on Linux. Default is False.
 
-        def port_sort_fn(portinfo):
-            """Function used when sorting ranked COM ports."""
-            return -portinfo[0]
-
-        found = []
+        Returns:
+            List[str]: A list of found COM ports that might be connected to a Sportident station.
+        """
+        found: List[str] = []
         if sys.platform.startswith("linux"):
             found = [
                 os.path.join("/dev", f)
@@ -141,11 +163,6 @@ class SIReader(SIConstants):
             ports = list(serial.tools.list_ports.comports())
             ranked_ports = []
             for p in ports:
-                """
-                print(p[0])
-                print(p[1])
-                print(p[2])
-                """
                 portname = p[0]
                 portname1 = p[1]
                 portname2 = p[2]
@@ -160,13 +177,12 @@ class SIReader(SIConstants):
                 ranked_ports.append([points, portname, portname1, portname2])
 
             # Sort on ranking
-            ranked_ports.sort(key=port_sort_fn)
+            ranked_ports.sort(key=lambda portinfo: -portinfo[0])
             # Try out the ports in the order they are ranked
             for portinfo in ranked_ports:
                 try:
-                    s = Serial(portinfo[1])
-                    found.append(s.portstr)
-                    s.close()
+                    with Serial(portinfo[1]) as s:
+                        found.append(s.portstr)
                 except SerialException:
                     pass
         else:
@@ -175,23 +191,28 @@ class SIReader(SIConstants):
         return found
 
     @classmethod
-    def scanStations(self, lowspeed=False):
-        """Scans all the possible serial ports and tries to find a SportIdent station
-        @return: array of (serial port name, station code)
+    def scan_stations(cls, lowspeed: bool = False) -> List[Tuple[str, int]]:
+        """Scans all the possible serial ports and tries to find a SportIdent station.
+
+        Args:
+            lowspeed (bool, optional): Flag indicating whether to use low-speed mode. Defaults to False.
+
+        Returns:
+            list: A list of tuples containing the found serial ports and their corresponding station codes.
         """
-        import threading
 
         found = []
 
-        def _run(port):
-            si = self(port=port, debug=True, lowspeed=lowspeed)
+        def _run(port: str):
+            si = cls(port=port, debug=True, lowspeed=lowspeed)
             stationCode = si.get_station_code()
             found.append((port, stationCode))
             si.disconnect()
 
         threads = []
         # Search in parallel
-        for port in self.guessSerialPorts():
+        for port in cls.guess_serial_ports():
+            # TODO: don't use threading, use asyncio
             t = threading.Thread(target=_run, args=(port,))
             threads.append(t)
             t.start()
@@ -200,30 +221,46 @@ class SIReader(SIConstants):
         return found
 
     def flush(self):
+        """
+        Flushes the input and output buffers of the serial connection.
+        """
         self._serial.flushInput()
         self._serial.flushOutput()
 
-    def set_extended_protocol(self, extended=True):
-        """Configure extended protocol mode of si station.
-        @param extended: Set extended protocol if True, legacy protocol if
-                         False.
+    def set_extended_protocol(self, extended: bool = True):
+        """Configure extended protocol mode of SI station.
+
+        Args:
+            extended (bool, optional): Set extended protocol if True, legacy protocol if False.
         """
         config = self.proto_config.copy()
         config["ext_proto"] = extended
         self._set_proto_config(config)
 
-    def set_autosend(self, autosend=True):
+    def set_autosend(self, autosend: bool = True):
         """Set si station into autosend mode.
-        @param autosend: Set autosend mode if True, unset otherwise.
+
+        Args:
+            autosend (bool, optional): Set autosend mode if True, unset otherwise.
         """
         config = self.proto_config.copy()
         config["auto_send"] = autosend
         config["handshake"] = not autosend
         self._set_proto_config(config)
 
-    def set_operating_mode(self, mode):
-        """Set si station operating mode.
-        @param mode: operating mode, supported modes: M_CONTROL, M_START, M_FINISH, M_READOUT, M_CLEAR, M_CHECK
+    def set_operating_mode(
+        self,
+        mode: Literal[
+            "M_CONTROL", "M_START", "M_FINISH", "M_READOUT", "M_CLEAR", "M_CHECK"
+        ],
+    ):
+        """Set SI station operating mode.
+
+        Args:
+            mode (Literal["M_CONTROL", "M_START", "M_FINISH", "M_READOUT", "M_CLEAR", "M_CHECK"]): The operating mode to set.
+
+        Raises:
+            SIReaderException: If the mode is not supported.
         """
         if not mode in SIReader.SUPPORTED_MODES:
             raise SIReaderException("Unsupported mode '%i'!" % mode)
@@ -232,9 +269,14 @@ class SIReader(SIConstants):
         finally:
             self._update_proto_config()
 
-    def set_station_code(self, code):
-        """Set si station control code.
-        @param code: control code (1-1023)
+    def set_station_code(self, code: int):
+        """Sets the SI station control code.
+
+        Args:
+            code (int): The control code (1-1023).
+
+        Raises:
+            SIReaderException: If the control code is invalid.
         """
         if code < 1 or code > 1023:
             raise SIReaderException(
@@ -251,30 +293,32 @@ class SIReader(SIConstants):
         finally:
             self._update_proto_config()
 
-    def set_baud_rate_4800(self):
-        """Set the baudrate to 4800 of the direct or remote station depending on
-        which one is currently being communicated with.
+    def set_baud_rate(self, baud_rate: Literal[4800, 38400]):
+        """Set the baudrate of the direct or remote station.
+
+        Args:
+            baud_rate (Literal[4800, 38400]): The baudrate to set. Must be either 4800 or 38400.
+
+        Raises:
+            SIReaderException: If an unsupported baud rate is provided.
         """
-        try:
-            self._send_command(SIReader.C_SET_BAUD, b"\x00")
-            self._serial.baudrate == 4800
-        finally:
-            pass
+        if baud_rate not in (4800, 38400):
+            raise SIReaderException("Unsupported baud rate '%i'!" % baud_rate)
+        baud_rate_identifier = b"\x00" if baud_rate == 4800 else b"\x01"
+        self._send_command(SIReader.C_SET_BAUD, baud_rate_identifier)
+        self._serial.baudrate = baud_rate
+
+    def set_baud_rate_4800(self):
+        """Set the baudrate to 4800"""
+        self.set_baud_rate(4800)
 
     def set_baud_rate_38400(self):
-        """Set the baudrate to 38400 of the direct or remote station depending on
-        which one is currently being communicated with.
-        """
-        try:
-            self._send_command(SIReader.C_SET_BAUD, b"\x01")
-            self._serial.baudrate == 38400
-        finally:
-            pass
+        """Set the baudrate to 38400"""
+        self.set_baud_rate(38400)
 
     def refresh_sysval(self):
         """Read the entire station configuration information (SYS_VAL) and store in the object
         so that the sysval_ functions can return good information.
-        @return : -
         """
         self.sysval = self._send_command(SIReader.C_GET_SYS_VAL, b"\x00\x80")[1]
 
@@ -982,8 +1026,13 @@ class SIReader(SIConstants):
             self._update_proto_config()
 
     def __del__(self):
+        """
+        Closes the serial connection and log file (if open) when the object is deleted.
+        """
         if self._serial is not None:
             self._serial.close()
+        if self._logfile is not None:
+            self._logfile.close()
 
     @staticmethod
     def _to_int(s):
