@@ -18,16 +18,23 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from .compat import byte2int
-from .exceptions import SIReaderException
-from .sireader import SIReader
-from .sireader_control import SIReaderControl
-from .sireader_readout import SIReaderReadout
+
+from six import PY3, byte2int, int2byte, iterbytes
 
 __all__ = [
-    "SIReader",
-    "SIReaderControl",
-    "SIReaderReadout",
-    "SIReaderException",
+    "PY3",
     "byte2int",
+    "int2byte",
+    "iterbytes",
 ]
+
+if PY3:
+    # Make byte2int on Python 3.x compatible with
+    # the fact that indexing into a byte variable
+    # already returns an integer. With this byte2int(b[0])
+    # works on 2.x and 3.x
+    def byte2int(x):
+        try:
+            return x[0]
+        except TypeError:
+            return x

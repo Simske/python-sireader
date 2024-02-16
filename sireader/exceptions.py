@@ -18,16 +18,14 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from .compat import byte2int
-from .exceptions import SIReaderException
-from .sireader import SIReader
-from .sireader_control import SIReaderControl
-from .sireader_readout import SIReaderReadout
 
-__all__ = [
-    "SIReader",
-    "SIReaderControl",
-    "SIReaderReadout",
-    "SIReaderException",
-    "byte2int",
-]
+class SIReaderException(Exception):
+    pass
+
+
+class SIReaderTimeout(Exception):
+    pass
+
+
+class SIReaderCardChanged(Exception):
+    pass

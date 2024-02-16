@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
-#
 #    Copyright (C) 2008-2014  Gaudenz Steinlin <gaudenz@durcheinandertal.ch>
 #                       2014  Simon Harston <simon@harston.de>
 #                       2015  Jan Vorwerk <jan.vorwerk@angexis.com>
 #                       2019  Per Magnusson <per.magnusson@gmail.com>
 #                       2023  Per Magnusson <per.magnusson@gmail.com>
+#                       2024  Simeon Doetsch <mail@simske.com>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -47,30 +46,19 @@ Additions and modifications by Per Magnusson:
 
 from __future__ import print_function
 
-from six import PY3, byte2int, int2byte, iterbytes
-
-if PY3:
-    # Make byte2int on Python 3.x compatible with
-    # the fact that indexing into a byte variable
-    # already returns an integer. With this byte2int(b[0])
-    # works on 2.x and 3.x
-    def byte2int(x):
-        try:
-            return x[0]
-        except TypeError:
-            return x
-
-
 import csv
 import os
 import re
 import sys
 from binascii import hexlify
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 
 import serial.tools.list_ports
 from serial import Serial
 from serial.serialutil import SerialException
+
+from .compat import PY3, byte2int, int2byte, iterbytes
+from .exceptions import SIReaderException, SIReaderTimeout
 
 
 class SIReader(object):
@@ -1844,212 +1832,3 @@ class SIReader(object):
         # not included in the offset constants (this byte always seems to be 0)
         start = byte2int(offset) + 1
         return bytearr[start : start + length]
-
-
-class SIReaderReadout(SIReader):
-    """Class for 'classic' SI card readout. Reads out the whole card. If you don't know
-    about other readout modes (control mode) you probably want this class."""
-
-    def __init__(self, *args, **kwargs):
-        super(type(self), self).__init__(*args, **kwargs)
-
-        self.sicard = None
-        self.cardtype = None
-
-    def poll_sicard(self):
-        """Polls for an SI-Card inserted or removed into the SI Station.
-        Returns true on state changes and false otherwise. If other commands
-        are received an Exception is raised."""
-
-        if not self.proto_config["ext_proto"]:
-            raise SIReaderException(
-                'This command only supports stations in "Extended Protocol" '
-                "mode. Switch mode first"
-            )
-
-        if not self.proto_config["mode"] == SIReader.M_READOUT:
-            raise SIReaderException(
-                "Station must be in 'Read SI cards' operating mode! Change operating mode first."
-            )
-
-        if self._serial.inWaiting() == 0:
-            return False
-
-        oldcard = self.sicard
-        while self._serial.inWaiting() > 0:
-            # _read_command does the actual parsing of the command
-            # if it's an insert or remove event
-            try:
-                self._read_command(timeout=0)
-            except SIReaderCardChanged:
-                pass
-
-        return not oldcard == self.sicard
-
-    def read_sicard(self, reftime=None):
-        """Reads out the SI Card currently inserted into the station. The card must be
-        detected with poll_sicard before."""
-
-        if not self.proto_config["ext_proto"]:
-            raise SIReaderException(
-                'This command only supports stations in "Extended Protocol" '
-                "mode. Switch mode first"
-            )
-
-        if not self.proto_config["mode"] == SIReader.M_READOUT:
-            raise SIReaderException(
-                "Station must be in 'Read SI cards' operating mode! Change operating mode first."
-            )
-
-        if self.cardtype == "SI5":
-            raw_data = self._send_command(SIReader.C_GET_SI5, b"")[1]
-        elif self.cardtype == "SI6":
-            raw_data = self._send_command(SIReader.C_GET_SI6, SIReader.P_SI6_CB)[1][1:]
-            raw_data += self._read_command()[1][1:]
-            raw_data += self._read_command()[1][1:]
-        elif self.cardtype in ("SI8", "SI9", "pCard"):
-            raw_data = b""
-            for b in range(SIReader.CARD[self.cardtype]["BC"]):
-                raw_data += self._send_command(SIReader.C_GET_SI9, int2byte(b))[1][1:]
-
-        elif self.cardtype == "SI10":
-            # Reading out SI10 cards block by block proved to be unreliable and slow
-            # Thus reading with C_GET_SI9 and block number 8 = P_SI6_CB like SI6
-            # cards
-            raw_data = self._send_command(SIReader.C_GET_SI9, SIReader.P_SI6_CB)[1][1:]
-            raw_data += self._read_command()[1][1:]
-            raw_data += self._read_command()[1][1:]
-            raw_data += self._read_command()[1][1:]
-            raw_data += self._read_command()[1][1:]
-        else:
-            raise SIReaderException("No card in the device.")
-
-        return SIReader._decode_carddata(raw_data, self.cardtype, reftime)
-
-    def ack_sicard(self):
-        """Sends an ACK signal to the SI Station. After receiving an ACK signal
-        the station blinks and beeps to signal correct card readout."""
-        try:
-            self._serial.write(SIReader.ACK)
-        except (SerialException, OSError) as msg:
-            raise SIReaderException("Could not send ACK: %s" % msg)
-
-    def _read_command(self, timeout=None):
-        """Reads commands from the station. As a station in readout mode can send a
-        card inserted or card removed event at any time we have to intercept these events
-        here."""
-        cmd, data = super(type(self), self)._read_command(timeout)
-
-        # check if a card was inserted or removed
-        if cmd == SIReader.C_SI_REM:
-            self.sicard = None
-            self.cardtype = None
-            raise SIReaderCardChanged("SI-Card removed during command.")
-        elif cmd == SIReader.C_SI5_DET:
-            self.sicard = self._decode_cardnr(data)
-            self.cardtype = "SI5"
-            raise SIReaderCardChanged("SI-Card inserted during command.")
-        elif cmd == SIReader.C_SI6_DET:
-            self.sicard = self._to_int(data)
-            self.cardtype = "SI6"
-            raise SIReaderCardChanged("SI-Card inserted during command.")
-        elif cmd == SIReader.C_SI9_DET:
-            # SI 9 sends corrupt first byte (insignificant)
-            self.sicard = self._to_int(data[1:])
-            if self.sicard >= 2000000 and self.sicard <= 2999999:
-                self.cardtype = "SI8"
-            elif self.sicard >= 1000000 and self.sicard <= 1999999:
-                self.cardtype = "SI9"
-            elif self.sicard >= 4000000 and self.sicard <= 4999999:
-                self.cardtype = "pCard"
-            #            elif self.sicard >= 6000000 and self.sicard <= 6999999:  # tCard, don't have one for testing
-            #                self.cardtype = 'SI9'
-            elif self.sicard >= 7000000 and self.sicard <= 9999999:
-                self.cardtype = "SI10"
-            else:
-                raise SIReaderException("Unknown cardtype!")
-            raise SIReaderCardChanged("SI-Card inserted during command.")
-
-        return (cmd, data)
-
-
-class SIReaderControl(SIReader):
-    """Class for reading an SI Station configured as control in autosend mode."""
-
-    def __init__(self, *args, **kwargs):
-        super(type(self), self).__init__(*args, **kwargs)
-        self._next_offset = None
-
-    def poll_punch(self, timeout=0):
-        """Polls for new punches.
-        @return: list of (cardnr, punchtime) tuples, empty list if no new punches are available
-        """
-
-        if not self.proto_config["ext_proto"]:
-            raise SIReaderException(
-                'This command only supports stations in "Extended Protocol" '
-                "mode. Switch mode first"
-            )
-
-        if not self.proto_config["auto_send"]:
-            raise SIReaderException(
-                'This command only supports stations in "Autosend" '
-                "mode. Switch mode first"
-            )
-
-        punches = []
-        while True:
-            try:
-                c = self._read_command(timeout=timeout)
-            except SIReaderTimeout:
-                break
-
-            if c[0] == SIReader.C_TRANS_REC:
-                cur_offset = SIReader._to_int(
-                    c[1][SIReader.T_OFFSET : SIReader.T_OFFSET + 3]
-                )
-                if self._next_offset is not None:
-                    while self._next_offset < cur_offset:
-                        # recover lost punches
-                        punches.append(self._read_punch(self._next_offset))
-                        self._next_offset += SIReader.REC_LEN
-
-                self._next_offset = cur_offset + SIReader.REC_LEN
-            punches.append(
-                (
-                    self._decode_cardnr(c[1][SIReader.T_CN : SIReader.T_CN + 4]),
-                    self._decode_time(c[1][SIReader.T_TIME : SIReader.T_TIME + 2]),
-                )
-            )
-        else:
-            raise SIReaderException(
-                "Unexpected command %s received" % hex(byte2int(c[0]))
-            )
-
-        return punches
-
-    def _read_punch(self, offset):
-        """Reads a punch from the SI Stations backup memory.
-        @param offset: Position in the backup memory to read
-        @warning:      Only supports firmwares 5.55+ older firmwares have an incompatible record format!
-        """
-        c = self._send_command(
-            SIReader.C_GET_BACKUP,
-            SIReader._to_str(offset, 3) + int2byte(SIReader.REC_LEN),
-        )
-        return (
-            self._decode_cardnr(b"\x00" + c[1][SIReader.BC_CN : SIReader.BC_CN + 3]),
-            self._decode_time(c[1][SIReader.BC_TIME : SIReader.BC_TIME + 2]),
-        )
-
-
-class SIReaderException(Exception):
-    pass
-
-
-class SIReaderTimeout(Exception):
-    pass
-
-
-class SIReaderCardChanged(Exception):
-    pass
