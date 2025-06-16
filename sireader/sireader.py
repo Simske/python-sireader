@@ -104,7 +104,7 @@ class SIReader(SIConstants):
 
         # TODO: refactor logging to file
         if logfile is not None:
-            self._logfile = open(logfile, "ab")
+            self._logfile = open(logfile, "a")
         else:
             self._logfile = None
         self.sysval: str = (
